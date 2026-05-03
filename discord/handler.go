@@ -168,29 +168,43 @@ func OnInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	switch customID {
 	case "spoiler":
-		contents := strings.Split(i.Message.Content, "\n")
-		spoileredContent := contents[0] + "\n||" + strings.Join(contents[1:], "\n") + "||"
+		// Defer the interaction first
 		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseUpdateMessage,
-			Data: &discordgo.InteractionResponseData{
-				Content:    spoileredContent,
-				Components: i.Message.Components,
-			},
+			Type: discordgo.InteractionResponseDeferredMessageUpdate,
 		})
 		if err != nil {
-			log.Printf("spoiler interaction ack failed: %v", err)
+			log.Printf("spoiler interaction defer failed: %v", err)
+			return
+		}
+
+		var resultContent string
+		contents := strings.Split(i.Message.Content, "\n")
+		if strings.Contains(contents[1], "|") {
+			// Remove spoiler markers
+			cleanedContent := strings.ReplaceAll(contents[1], "|", "")
+			resultContent = contents[0] + "\n" + cleanedContent
+		} else {
+			// Add spoiler markers
+			resultContent = contents[0] + "\n||" + strings.Join(contents[1:], "\n") + "||"
+		}
+
+		// Edit the message after deferring
+		_, err = s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			Content:    &resultContent,
+			Components: &i.Message.Components,
+		})
+		if err != nil {
+			log.Printf("spoiler interaction edit failed: %v", err)
 			return
 		}
 
 	case "delete":
+		// Defer the interaction first
 		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "This message has been deleted by " + "**" + operator + "**",
-			},
+			Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
 		})
 		if err != nil {
-			log.Printf("delete interaction ack failed: %v", err)
+			log.Printf("delete interaction defer failed: %v", err)
 			return
 		}
 
