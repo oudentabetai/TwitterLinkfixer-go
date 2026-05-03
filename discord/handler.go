@@ -1,10 +1,12 @@
 package discord
 
 import (
+	"log"
 	"regexp"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/oudentabetai/twitterlinkfixer-go/storage"
 )
 
 // 各サービスのプレフィックスと変換先のマップ
@@ -72,6 +74,67 @@ func ConvertMessage(msg string) (string, bool) {
 	return "", false // 変換が行われなかった場合
 }
 
+func firstURL(text string) string {
+	re := regexp.MustCompile(`https?://[^\s<>]+`)
+	return re.FindString(text)
+}
+
+func SendCovertedMessage(s *discordgo.Session, m *discordgo.MessageCreate, originalContent string, convertedContent string) {
+	originalURL := firstURL(originalContent)
+	if originalURL == "" {
+		originalURL = originalContent
+	}
+
+	_, err := s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
+		Content: "`" + "replaced message sent by: " + m.Author.Username + "`" + "\n" + convertedContent,
+		Components: []discordgo.MessageComponent{
+			&discordgo.ActionsRow{
+				Components: []discordgo.MessageComponent{
+					// 1つ目のボタン
+					discordgo.Button{
+						Label: "Open",
+						Style: discordgo.LinkButton,
+						URL:   originalURL,
+					},
+					// 2つ目のボタン
+					discordgo.Button{
+						Label:    "Spoiler",
+						Style:    discordgo.PrimaryButton,
+						CustomID: "spoiler",
+					},
+					// 3つ目のボタン
+					discordgo.Button{
+						Label:    "Delete",
+						Style:    discordgo.DangerButton,
+						CustomID: "delete",
+					},
+				},
+			},
+		},
+	})
+
+	if err != nil {
+		log.Printf("メッセージ送信失敗: %v", err)
+	}
+}
+
+func sendDeleteLog(s *discordgo.Session, fallbackChannelID string, content string) {
+	logChannelID := storage.Envs.LOG_CHANNEL_ID
+	if logChannelID != "" {
+		if _, err := s.ChannelMessageSend(logChannelID, content); err == nil {
+			return
+		} else {
+			log.Printf("failed to send delete log to log channel: %v", err)
+		}
+	}
+
+	if fallbackChannelID != "" {
+		if _, err := s.ChannelMessageSend(fallbackChannelID, content); err != nil {
+			log.Printf("failed to send delete log to fallback channel: %v", err)
+		}
+	}
+}
+
 func OnMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	// メッセージがボット自身のものであれば無視
 	if m.Author.ID == s.State.User.ID {
@@ -81,10 +144,69 @@ func OnMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	converted, changed := ConvertMessage(content)
 	if changed {
 		// 変換されたURLを含むメッセージを送信
-		_, err := s.ChannelMessageSend(m.ChannelID, converted)
+		s.ChannelMessageDelete(m.ChannelID, m.ID)
+		SendCovertedMessage(s, m, content, converted)
+	}
+}
+
+func OnInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionMessageComponent {
+		return
+	}
+
+	customID := i.MessageComponentData().CustomID
+	if i.Message == nil {
+		return
+	}
+
+	operator := "unknown"
+	if i.Member != nil && i.Member.User != nil {
+		operator = i.Member.User.Username
+	} else if i.User != nil {
+		operator = i.User.Username
+	}
+
+	switch customID {
+	case "spoiler":
+		contents := strings.Split(i.Message.Content, "\n")
+		spoileredContent := contents[0] + "\n||" + strings.Join(contents[1:], "\n") + "||"
+		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: &discordgo.InteractionResponseData{
+				Content:    spoileredContent,
+				Components: i.Message.Components,
+			},
+		})
 		if err != nil {
-			// エラー処理（例: ログに記録）
+			log.Printf("spoiler interaction ack failed: %v", err)
 			return
+		}
+
+	case "delete":
+		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "This message has been deleted by " + "**" + operator + "**",
+			},
+		})
+		if err != nil {
+			log.Printf("delete interaction ack failed: %v", err)
+			return
+		}
+
+		sendDeleteLog(s, "", "This Message has been deleted by "+operator+"\n"+i.Message.Content)
+
+		err = s.ChannelMessageDelete(i.ChannelID, i.Message.ID)
+		if err != nil {
+			log.Printf("failed to delete message: %v", err)
+		}
+
+	default:
+		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+		})
+		if err != nil {
+			log.Printf("unknown interaction ack failed: %v", err)
 		}
 	}
 }

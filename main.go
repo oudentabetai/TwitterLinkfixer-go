@@ -16,19 +16,26 @@ var (
 )
 
 func main() {
+	if err := storage.Envs.Validate(); err != nil {
+		log.Fatal(err)
+	}
+
 	sessionManager := &discord.DiscordSessionManager{}
 	dgs = sessionManager.InitializeSession(storage.Envs.DISCORD_BOT_TOKEN)
-	dgs.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsGuilds | discordgo.IntentsGuildMembers | discordgo.IntentsAll | discordgo.PermissionSendMessages
+
+	dgs.Identify.Intents = discordgo.IntentsGuilds |
+		discordgo.IntentsGuildMessages |
+		discordgo.IntentsGuildMembers |
+		discordgo.IntentsMessageContent
+
+	dgs.AddHandler(discord.OnMessageCreate)
+	dgs.AddHandler(discord.OnInteractionCreate)
+
 	if err := dgs.Open(); err != nil {
 		log.Fatalf("Discordセッションのオープンに失敗: %v", err)
 	}
-	dgs.AddHandler(discord.OnMessageCreate)
-	//dgs.AddHandler(discord.OnInteractionCreate)
 	defer dgs.Close()
-	log.Println("ボットが起動しました。Ctrl+Cで終了します。")
 
-	//deleteAllGlobalCommands(dgs, os.Getenv("APPLICATION_ID"))
-	//SyncCommands(dgs, "", storage.Envs.APPLICATION_ID)
 	waitForExitSignal()
 }
 
