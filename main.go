@@ -16,10 +16,6 @@ var (
 )
 
 func main() {
-	if err := storage.Envs.Validate(); err != nil {
-		log.Fatal(err)
-	}
-
 	sessionManager := &discord.DiscordSessionManager{}
 	dgs = sessionManager.InitializeSession(storage.Envs.DISCORD_BOT_TOKEN)
 
