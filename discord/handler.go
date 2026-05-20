@@ -86,7 +86,7 @@ func SendCovertedMessage(s *discordgo.Session, m *discordgo.MessageCreate, origi
 	}
 
 	_, err := s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
-		Content: "`" + "replaced message sent by: " + m.Author.Username + "`" + "\n" + convertedContent,
+		Content: "`" + "replaced message sent by: " + m.Author.DisplayName() + "`" + "\n" + convertedContent,
 		Components: []discordgo.MessageComponent{
 			&discordgo.ActionsRow{
 				Components: []discordgo.MessageComponent{
